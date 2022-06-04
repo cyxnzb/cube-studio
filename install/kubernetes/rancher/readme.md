@@ -41,7 +41,7 @@ init_node.sh 是为了初始化机器，可以把自己的要做的初始化任�
 卸载已经存在的docker，安装docker并把默认路径放在/data/docker目录下，防止放在/var/lib/docker目录下机器磁盘会满
 为docker添加私有仓库拉取权限
 
-reset_docker.sh 是为了在机器从rancher集群踢出以后，把rancher环境清理感觉，回归自由机器。
+reset_docker.sh 是为了在机器从rancher集群踢出以后，把rancher环境清理干净，回归自由机器。
 
 
 # 部署rancher server
