@@ -3,7 +3,7 @@ import os,re
 # 所需要的所有镜像
 kubeflow = [
     'mysql:8.0.32',  # 数据库
-    'bitnami/redis:7.4',  # 缓存
+    'ccr.ccs.tencentyun.com/cube-studio/redis:7.4',  # 缓存
     "busybox:1.36.0",
     "kubeflow/training-operator:v1-8a066f9",  # 分布式训练
     'alpine:3.10',
@@ -26,7 +26,7 @@ new_prometheus = [
 
     'quay.io/prometheus-operator/prometheus-config-reloader:v0.46.0',  # prometheus配置翻译
     "quay.io/prometheus-operator/prometheus-operator:v0.46.0",  # prometheus 部署工具
-    'bitnami/kube-rbac-proxy:0.14.1',  # 指标
+    'ccr.ccs.tencentyun.com/cube-studio/kube-rbac-proxy:0.14.1',  # 指标
     'carlosedp/addon-resizer:v1.8.4',  # 指标
 
     'grafana/grafana:9.5.20',  # 监控看板
@@ -45,9 +45,9 @@ volcano = [
 
 pipeline = [
     'minio/minio:RELEASE.2023-04-20T17-56-55Z',
-    'argoproj/argoexec:v3.4.3',
-    'argoproj/workflow-controller:v3.4.3',
-    'argoproj/argocli:v3.4.3'
+    'ccr.ccs.tencentyun.com/cube-argoproj/argoexec:v3.4.3',
+    'ccr.ccs.tencentyun.com/cube-argoproj/workflow-controller:v3.4.3',
+    'ccr.ccs.tencentyun.com/cube-argoproj/argocli:v3.4.3'
 ]
 cube_studio = [
     # 前后端

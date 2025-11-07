@@ -52,7 +52,6 @@ docker pull ccr.ccs.tencentyun.com/cube-studio/kubeflow-dashboard-frontend:2025.
 注意：前后端代码生产环境均在容器中运行。
 
 后端开发调试：代码通过挂载，在本机ide中修改，在docker-compose中运行调试，debug模式自动热更新。
-
 前端调试：大部分功能在本机ide开发调试即可，支持热更新。完整的平台前端调试需要本地ide开发完成后打包编译为静态文件，也可以在docker中编译成静态文件，在docker-compose中运行验证，不同于后端，这种docker中调试的话前端不支持热更新。
 
 #### 本地后端python代码开发
@@ -82,7 +81,6 @@ docker-compose.yaml文件在install/docker目录下，这里提供了mac和linux
 1) debug backend
 ```
 STAGE: 'dev'
-cd install/docker/
 docker-compose -f docker-compose.yml  up
 ```
 
@@ -153,7 +151,7 @@ yarn: npm install yarn -g
 
  -  `cd myapp/frontend` 进入目录
  - `npm run start` 进入调试模式。
- - - 首次进入  http://localhost:3000/login?username=admin&login_url=http://localhost:3000/frontend/
+ - - 首次进入  http://localhost:3000/login?username=admin&login_url=http://localhost:3000/frontend/  跳转后页面可直接关闭
  - - 后面可直接进入 前端 http://localhost:3000/frontend/
 
 ### vision 任务流编排
@@ -167,7 +165,8 @@ yarn: npm install yarn -g
 2、前端启动
  -  `cd myapp/vision` 进入目录
  - `npm run dev` 进入调试模式。
- - - vision启动访问地址：http://localhost:3000/   或者某个pipeline的id， http://localhost:3000/?pipeline_id=1#/
+ - - 首次进入  http://localhost:3000/login?username=admin&login_url=http://localhost:3000/frontend/  跳转后页面可直接关闭
+ - - vision启动 首页访问地址：http://localhost:3000/#/home/   或者某个pipeline的id， http://localhost:3000/?pipeline_id=1#/
 
 ### visionPlus 任务流编排
 
@@ -180,6 +179,7 @@ yarn: npm install yarn -g
 2、前端启动
  -  `cd myapp/visionPlus` 进入目录
  - `npm run dev` 进入调试模式。
+ - - 首次进入  http://localhost:3000/login?username=admin&login_url=http://localhost:3000/frontend/  跳转后页面可直接关闭
  - - visionPLus启动访问地址：http://localhost:3000/?scenes=etl_pipeline&pipeline_id=1
 
 

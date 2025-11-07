@@ -430,12 +430,13 @@ class Pipeline(Model,ImportMixin,AuditMixinNullable,MyappModelBase):
 
         # 增加新的task的位置
         for task_id in tasks:
-            exist=False
-            for item in expand_tasks:
+            exist_index=-1
+            for index,item in enumerate(expand_tasks):
                 if "data" in item and item['id']==str(task_id):
-                    exist=True
+                    exist_index=index
                     break
-            if not exist:
+            # 如果后端有节点，但是前端没有节点信息，就增加一个
+            if exist_index==-1:
                 # if task_id not in expand_tasks:
                 expand_tasks.append({
                     "id": str(task_id),
@@ -454,6 +455,14 @@ class Pipeline(Model,ImportMixin,AuditMixinNullable,MyappModelBase):
                         "label": tasks[task_id].label
                     }
                 })
+            else:
+                expand_tasks[exist_index]['data']={
+                    "info": {
+                        "describe": tasks[task_id].job_template.describe
+                    },
+                    "name": tasks[task_id].name,
+                    "label": tasks[task_id].label
+                }
 
         # 重写所有task的上下游关系
         dag_json = json.loads(self.dag_json)
@@ -528,7 +537,7 @@ class Task(Model,ImportMixin,AuditMixinNullable,MyappModelBase):
     outputs = Column(Text,default='{}',comment='task的输出，会将输出复制到minio上 ')   #   {'prediction': '/output.txt'}
     monitoring = Column(Text,default='{}',comment='该任务的监控信息')  #
     expand = Column(Text(65536), default='',comment='扩展参数')
-    skip = Column(Boolean,default=False,comment='是否跳过')  #
+    skip = Column(Boolean,name='skip',default=False,comment='是否跳过',quote=True)  #
     export_parent = "pipeline"
 
 
