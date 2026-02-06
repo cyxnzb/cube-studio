@@ -1579,6 +1579,26 @@ def checkip(ip):
     else:
         return False
 
+def get_cpu(resource_cpu):
+    cpu_type = None
+    try:
+        if resource_cpu:
+            # 英文括号
+            if '(' in resource_cpu:
+                cpu_type = re.findall(r"\((.+?)\)", resource_cpu)
+                cpu_type = cpu_type[0] if cpu_type else None
+            # 中文括号
+            if '（' in resource_cpu:
+                cpu_type = re.findall(r"（(.+?)）", resource_cpu)
+                cpu_type = cpu_type[0] if cpu_type else None
+
+            # 处理中文括号，和英文括号
+            resource_cpu = resource_cpu[0:resource_cpu.index('(')] if '(' in resource_cpu else resource_cpu
+            resource_cpu = resource_cpu[0:resource_cpu.index('（')] if '（' in resource_cpu else resource_cpu
+    except Exception as e:
+        print(e)
+    cpu_type = cpu_type.upper() if cpu_type else None
+    return resource_cpu, cpu_type
 
 def get_gpu(resource_gpu,resource_name=None):
     from myapp import conf,db
@@ -1587,6 +1607,7 @@ def get_gpu(resource_gpu,resource_name=None):
     if not resource_name:
         resource_name=conf.get('DEFAULT_GPU_RESOURCE_NAME','')
     gpu_type = None
+
     try:
         if resource_gpu:
             # 英文括号
@@ -1906,94 +1927,6 @@ def split_url(url):
             host, port = url,''
         return host,port,''
 
-
-# @pysnooper.snoop()
-def get_all_resource(cluster='all',namespace='all',exclude_pod=[]):
-    from myapp.utils.py.py_k8s import K8s
-    from myapp import conf,security_manager,db
-    if cluster=='all':
-        clusters=conf.get('CLUSTERS')
-    else:
-        clusters={
-            cluster:conf.get('CLUSTERS').get(cluster,{})
-        }
-    if namespace=='all':
-        namespaces=security_manager.get_all_namespace(db.session)
-    else:
-        namespaces=[namespace]
-
-    all_resource = []
-    # 一种方式是从数据库里面查询当前正在运行的。
-    # from myapp.models.model_pod import Pod
-    # pods = db.session.query(Pod).filter(Pod.cluster.in_(clusters)).filter(Pod.namespace.in_(namespaces)).filter(Pod.status=='Running').all()
-    #
-    # for pod in pods:
-    #     # 集群，资源组，空间，项目组，用户，resource，值
-    #     all_resource.append([pod.cluster,pod.org, pod.namespace, pod.project.name if pod.project else '', pod.user.username if pod.user else '', pod.name,json.loads(pod.labels), 'cpu', float(json.loads(pod.resource).get('cpu',0))])
-    #     all_resource.append([pod.cluster, pod.org, pod.namespace, pod.project.name if pod.project else '',pod.user.username if pod.user else '', pod.name, json.loads(pod.labels), 'memory',float(json.loads(pod.resource).get('memory', 0))])
-    #     gpu_value = sum([float(v) for k,v in json.loads(pod.resource).items() if k in conf.get('GPU_RESOURCE', {})])
-    #     all_resource.append([pod.cluster, pod.org, pod.namespace, pod.project.name if pod.project else '',pod.user.username if pod.user else '', pod.name, json.loads(pod.labels), 'gpu',gpu_value])
-
-    # 一种方式是现场查询正在运行的，有些pod没在running中，但是已经占了资源
-    for cluser_name in clusters:
-        cluster = clusters[cluser_name]
-        k8s_client = K8s(cluster.get('KUBECONFIG', ''))
-        import concurrent.futures
-        # 使用线程池并行查询
-        with concurrent.futures.ThreadPoolExecutor() as executor:
-            # 为每个namespace提交任务
-            future_to_namespace = {
-                executor.submit(lambda kwargs: k8s_client.get_pods(**kwargs), {"namespace": namespace, "cache": True}): namespace for namespace in namespaces
-            }
-            # 等待所有任务完成并收集结果
-            for future in concurrent.futures.as_completed(future_to_namespace):
-                namespace = future_to_namespace[future]
-                try:
-                    pods = future.result()
-                    for pod in pods:
-                        # 要计算是否占上资源的
-                        if k8s_client.exist_hold_resource(pod):
-                            # 集群，资源组，空间，项目组，用户，resource，值
-                            user = pod['labels'].get('user', pod['labels'].get('username', pod['labels'].get('run-rtx',pod['labels'].get('run-username','admin'))))
-                            project = pod['annotations'].get('project', 'public')
-                            all_resource.append([cluser_name, pod['node_selector'].get('org', 'public'), namespace, project, user, pod['name'], pod['labels'], 'cpu', float(pod['cpu'])])
-                            all_resource.append([cluser_name, pod['node_selector'].get('org', 'public'), namespace, project, user, pod['name'], pod['labels'], 'memory', float(pod['memory'])])
-                            gpu_resource = conf.get('GPU_RESOURCE', {})
-                            for ai_device in gpu_resource:
-                                gpu_value = float(pod.get(ai_device, '0'))
-                                if gpu_value > 0:
-                                    all_resource.append([cluser_name, pod['node_selector'].get('org', 'public'), namespace, project, user, pod['name'], pod['labels'], 'gpu', gpu_value])
-
-                except Exception as e:
-                    print(f"Error getting pods for namespace {namespace}: {e}")
-
-
-
-
-    columns = ['cluster', 'org', 'namespace', 'project', 'user', 'name','labels','resource', 'value']
-    all_resource =[dict(zip(columns,resource)) for resource in all_resource]
-    # print(all_resource)
-    if type(exclude_pod) == str:
-        exclude_pod = [exclude_pod]
-    # 直接指定排除的pod名称
-    if type(exclude_pod)==list:
-        all_resource = [pod for pod in all_resource if pod['name'] not in exclude_pod]
-    # 通过字典过滤排除pod
-    elif type(exclude_pod)==dict:
-        all_resource = [pod for pod in all_resource if not all(item in pod['labels'].items() for item in exclude_pod.items())]
-        # all_resource_temp = []
-        # for pod in all_resource:
-        #     can_add=False
-        #     for key in exclude_pod:
-        #         # 写的简洁些
-        #         if key not in pod['labels'] or pod['labels'][key]!=exclude_pod[key]:
-        #             can_add = True
-        #             break
-        #     if can_add:
-        #         all_resource_temp.append(pod)
-        # all_resource = all_resource_temp
-    return all_resource
-
 # 获取指定端口以后的5个非黑名单端口
 def get_not_black_port(port):
     from myapp import conf
@@ -2004,204 +1937,6 @@ def get_not_black_port(port):
             meet_port.append(port)
         port+=1
     return meet_port
-
-# 验证用户资源额度限制
-# @pysnooper.snoop()
-def meet_quota(req_user,req_project,req_cluster_name,req_org,req_namespace,exclude_pod=[],req_resource={},replicas=1):
-    # 管理员不受限制
-    if req_user.is_admin():
-        return True,''
-
-    # resource为{"cpu":1,"memory":1,"gpu":1}格式
-    # quota 书写格式，cluster_name，org,namespace，resource，single_concurrent,value
-    # exclude_pod数组格式表示忽略的名称数组，字典格式表述忽略的pod标签，字符串表示原始的pod名
-
-    # 添加对gpu型号的处理
-    req_resource={
-        "cpu": str(req_resource.get('cpu','0')),
-        "memory": str(req_resource.get('memory','0')),
-        "gpu": str(req_resource.get('gpu','0')),
-    }
-    req_resource['gpu'] = req_resource['gpu'].split('(')[0].split(',')[-1]
-
-    all_resources = None
-    # req_total_resource={key:float(str(req_resource[key]).replace('G',''))*replicas for key in req_resource}
-    # 验证用户username在集群cluster_name的namespace空间下运行value大的resource(cpu,memory,gpu)资源是否允许
-    # 先来验证是否有个人用户额度限制，单集群限制，单空间限制
-    if req_user.quota:
-        if not all_resources:
-            all_resources = get_all_resource(exclude_pod=exclude_pod)
-
-        quota_confg = req_user.quota
-        quotas_array = re.split(';|\n',quota_confg.strip())
-        quotas=[]
-        for quota in quotas_array:
-            quota = quota.replace(' ','').strip()
-            if len(quota.split(','))==6:
-                quotas.append(dict(zip(['cluser','org','namespace','resource','type','value'],quota.split(','))))
-
-        for quota in quotas:
-            if quota['namespace']=='notebook':
-                quota['namespace']='jupyter'
-
-            # 查看单个任务是否满足资源限制
-            if quota['type']=='single':
-                if req_cluster_name == quota['cluser'] or quota['cluser'] == 'all':
-                    if req_org == quota['org'] or quota['org'] == 'all':
-                        if req_namespace==quota['namespace'] or quota['namespace']=='all':
-                            limit_resource = float(quota['value'])
-                            request_resource = float(str(req_resource.get(quota['resource'],'0')).replace('G',''))
-                            message = f'user {quota["type"]} quota: \nrequest {quota["resource"]} {request_resource}, user limit {limit_resource}'
-                            print(message)
-                            if request_resource>limit_resource:
-                                return False,Markup("<br>"+message.replace('\n','<br>'))
-
-            # 查看正在运行的整体资源是否满足资源限制
-            if quota['type']=='concurrent':
-                if req_cluster_name == quota['cluser'] or quota['cluser'] == 'all':
-                    if req_org == quota['org'] or quota['org'] == 'all':
-                        if req_namespace==quota['namespace'] or quota['namespace']=='all':
-                            exist_pod = all_resources
-                            # 过滤个人名下的pod
-                            exist_pod = [pod for pod in exist_pod if pod['user'] == req_user.username]
-                            # 过滤当前资源类型
-                            exist_pod = [pod for pod in exist_pod if pod['resource'] == quota['resource']]
-
-                            if quota['cluser']!='all':
-                                exist_pod = [pod for pod in exist_pod if pod['cluster']==quota['cluser']]
-                            if quota['namespace']!='all':
-                                exist_pod = [pod for pod in exist_pod if pod['namespace'] == quota['namespace']]
-                            if quota['org']!='all':
-                                exist_pod = [pod for pod in exist_pod if pod['org'] == quota['org']]
-
-                            exist_resource = sum([float(str(pod.get('value','0')).replace('G','')) for pod in exist_pod])
-                            limit_resource = float(quota['value'])
-                            request_resource = float(str(req_resource.get(quota['resource'], '0')).replace('G', ''))
-                            message = f'user {quota["type"]} quota: \nrequest {quota["resource"]} {request_resource} * {replicas}, user limit {limit_resource}, exist {exist_resource}'
-                            message += "\nexist pod:\n" + '\n'.join([pod['labels'].get('pod-type', 'task') + ":" + pod['name'] for pod in exist_pod])
-
-                            print(message)
-                            # 如果用户没有申请这个资源值，也不报错，比如gpu资源超过了，但用户可能不申请gpu资源
-                            if request_resource>0 and request_resource*replicas>(limit_resource-exist_resource):
-                                return False,Markup("<br>"+message.replace('\n','<br>'))
-
-            if quota['type']=='total':
-                pass
-
-    # 或者这个项目下的限制，比如对每个人的限制和对项目组的总和设置，已经确保了申请项目组，与额度配置项目组相同
-    if req_project.quota():
-        if not all_resources:
-            all_resources = get_all_resource(exclude_pod=exclude_pod)
-
-        quota_confg = req_project.quota()
-        quotas_array = re.split(';|\n', quota_confg.strip())
-        quotas = []
-        for quota in quotas_array:
-            if len(quota.split(',')) == 4:
-                quota = quota.replace(' ', '').strip()
-                quotas.append(dict(zip(['namespace', 'resource', 'type', 'value'], quota.split(','))))
-
-        for quota in quotas:
-            if quota['namespace']=='notebook':
-                quota['namespace']='jupyter'
-
-            # 查看单个任务是否满足资源限制
-            if quota['type'] == 'single':
-                if req_namespace==quota['namespace'] or quota['namespace']=='all':
-                    limit_resource = float(quota['value'])
-                    request_resource = float(str(req_resource.get(quota['resource'], '0')).replace('G', ''))
-                    message = f'project {quota["type"]} quota: \nrequest {quota["resource"]} {request_resource}, project limit {limit_resource}'
-                    print(message)
-                    if request_resource > limit_resource:
-                        return False,Markup("<br>"+message.replace('\n','<br>'))
-
-            # 查看正在运行的整体资源是否满足资源限制
-            if quota['type'] == 'concurrent':
-                if req_namespace == quota['namespace'] or quota['namespace'] == 'all':
-                    exist_pod = all_resources
-                    # 过滤该项目组下的pod
-                    exist_pod = [pod for pod in exist_pod if pod['project'] == req_project.name]
-                    # 过滤当前资源类型
-                    exist_pod = [pod for pod in exist_pod if pod['resource'] == quota['resource']]
-
-                    # print(exist_pod)
-                    if quota['namespace'] != 'all':
-                        exist_pod = [pod for pod in exist_pod if pod['namespace'] == quota['namespace']]
-
-                    # print(exist_pod)
-                    # print(quota['resource'])
-                    exist_resource = sum([float(str(pod.get('value', '0')).replace('G', '')) for pod in exist_pod])
-                    limit_resource = float(quota['value'])
-                    request_resource = float(str(req_resource.get(quota['resource'], '0')).replace('G', ''))
-                    message = f'project {quota["type"]} quota: \nrequest {quota["resource"]} {request_resource} * {replicas}, project limit {limit_resource}, exist {exist_resource}'
-                    message +="\nexist pod:\n"+'\n'.join([pod['labels'].get('pod-type','task')+":"+pod['name'] for pod in exist_pod])
-                    print(message)
-                    # message += '\n<a target="_blank" href="https://www.w3schools.com">申请资源</a>'
-                    # 如果用户没有申请这个资源值，也不报错，比如gpu资源超过了，但用户可能不申请gpu资源
-                    if request_resource>0 and request_resource*replicas > (limit_resource - exist_resource):
-                        return False,Markup("<br>"+message.replace('\n','<br>'))
-
-            if quota['type'] == 'total':
-                pass
-
-    # 获取项目组下对个人的额度限制，已经确保了申请项目组，与额度配置项目组相同
-    if req_project.quota(userid=req_user.id):
-
-        if not all_resources:
-            all_resources = get_all_resource(exclude_pod=exclude_pod)
-
-        quota_confg = req_project.quota(userid=req_user.id)
-        quotas_array = re.split(';|\n', quota_confg.strip())
-        quotas = []
-        for quota in quotas_array:
-            quota = quota.replace(' ', '').strip()
-            if len(quota.split(',')) == 4:
-                quotas.append(dict(zip(['namespace', 'resource', 'type', 'value'], quota.split(','))))
-
-        for quota in quotas:
-            if quota['namespace']=='notebook':
-                quota['namespace']='jupyter'
-
-            # 查看单个任务是否满足资源限制
-            if quota['type'] == 'single':
-                if req_namespace == quota['namespace'] or quota['namespace'] == 'all':
-                    limit_resource = float(quota['value'])
-                    request_resource = float(str(req_resource.get(quota['resource'], '0')).replace('G', ''))
-                    message = f'project user {quota["type"]} quota: \nrequest {quota["resource"]} {request_resource}, project limit {limit_resource}'
-                    print(message)
-                    if request_resource > limit_resource:
-                        return False,Markup("<br>"+message.replace('\n','<br>'))
-
-            # 查看正在运行的整体资源是否满足资源限制，
-            if quota['type'] == 'concurrent':
-                if req_namespace == quota['namespace'] or quota['namespace'] == 'all':
-                    exist_pod = all_resources
-                    # 过滤该项目组下的pod
-                    exist_pod = [pod for pod in exist_pod if pod['project'] == req_project.name and pod['user']==req_user.username]
-                    # 过滤当前资源类型
-                    exist_pod = [pod for pod in exist_pod if pod['resource'] == quota['resource']]
-
-                    if quota['namespace'] != 'all':
-                        exist_pod = [pod for pod in exist_pod if pod['namespace'] == quota['namespace']]
-
-                    # print(exist_pod)
-                    # print(quota['resource'])
-                    exist_resource = sum([float(str(pod.get('value', '0')).replace('G', '')) for pod in exist_pod])
-                    limit_resource = float(quota['value'])
-                    request_resource = float(str(req_resource.get(quota['resource'], '0')).replace('G', ''))
-                    message = f'project user {quota["type"]} quota: \nrequest {quota["resource"]} {request_resource} * {replicas}, project limit {limit_resource}, exist {exist_resource}'
-                    message +="\nexist pod:\n"+'\n'.join([pod['labels'].get('pod-type','task')+":"+pod['name'] for pod in exist_pod])
-
-                    print(message)
-                    # 如果用户没有申请这个资源值，也不报错，比如gpu资源超过了，但用户可能不申请gpu资源
-                    if request_resource>0 and request_resource*replicas > (limit_resource - exist_resource):
-                        return False,Markup("<br>"+message.replace('\n','<br>'))
-
-            if quota['type'] == 'total':
-                pass
-
-    return True,''
-
 
 def test_database_connection(url):
     from sqlalchemy import create_engine
@@ -2333,54 +2068,87 @@ def table_html(csv_path,features=None,zip_file=None):  # zip_file 用来表示�
     else:
         return df.to_html(escape=False,bold_rows=False,border=1)
 
+# @pysnooper.snoop()
+def notebook_cascade_demo(NOTEBOOK_IMAGES):
+    options=[]
+    if not NOTEBOOK_IMAGES:
+        options = [
+            {
+                "id": "zhejiang",
+                "value": "Zhejiang",
+                "children": [
+                    {
+                        "value": "hangzhou",
+                        "label": "Hangzhou",
+                        "children": [
+                            {
+                                "value": "xihu",
+                                "label": "West Lake",
+                            },
+                        ],
+                    },
+                ],
+            },
+            {
+                "id": "jiangsu",
+                "value": "Jiangsu",
+                "children": [
+                    {
+                        "value": "nanjing",
+                        "label": "Nanjing",
+                        "children": [
+                            {
+                                "value": "zhonghuamen",
+                                "label": "Zhong Hua Men",
+                            },
+                        ],
+                    },
+                ],
+            },
+        ]
+    else:
+        for key in NOTEBOOK_IMAGES:
 
-def notebook_cascade_demo():
-    options = [
-        {
-            "id": "zhejiang",
-            "value": "Zhejiang",
-            "children": [
-                {
-                    "value": "hangzhou",
-                    "label": "Hangzhou",
-                    "children": [
-                        {
-                            "value": "xihu",
-                            "label": "West Lake",
-                        },
-                    ],
-                },
-            ],
-        },
-        {
-            "id": "jiangsu",
-            "value": "Jiangsu",
-            "children": [
-                {
-                    "value": "nanjing",
-                    "label": "Nanjing",
-                    "children": [
-                        {
-                            "value": "zhonghuamen",
-                            "label": "Zhong Hua Men",
-                        },
-                    ],
-                },
-            ],
-        },
-    ]
+            if type(NOTEBOOK_IMAGES[key])==str:
+                one_key = {
+                    "id": NOTEBOOK_IMAGES[key],
+                    "value": key,
+                }
+            else:
+                one_key1_arr=[]
+                for key1 in NOTEBOOK_IMAGES[key]:
+                    if type(NOTEBOOK_IMAGES[key][key1])==str:
+                        one_key1 = {
+                            "label": key1,
+                            "id": NOTEBOOK_IMAGES[key][key1],
+                            "value": NOTEBOOK_IMAGES[key][key1],
+                        }
+                    else:
+                        one_key2_arr=[]
+                        for key2 in NOTEBOOK_IMAGES[key][key1]:
+                            one_key2 = {
+                                "label": key2,
+                                "id": NOTEBOOK_IMAGES[key][key1][key2],
+                                "value": str(NOTEBOOK_IMAGES[key][key1][key2]),
+                            }
+                            one_key2_arr.append(one_key2)
+                        one_key1={
+                            "label": key1,
+                            "value": key1,
+                            "children": one_key2_arr
+                        }
+                    one_key1_arr.append(one_key1)
+
+                one_key = {
+                    "id": key,
+                    "value": key,
+                    "children": one_key1_arr
+                }
+
+            options.append(one_key)
+        pass
+    # print("options:",options)
     return options
-
-
-import hashlib
-# 计算文件的md5
-def calculate_md5(file_path):
-
-    hash_md5 = hashlib.md5()
-    with open(file_path, "rb") as f:
-        for chunk in iter(lambda: f.read(4096), b""):
-            hash_md5.update(chunk)
-    return hash_md5.hexdigest()
 
 
 # 从网络下载文件
@@ -2408,78 +2176,6 @@ def download_file(url,local_dir):
 
     local_filename = download_file(url, local_filename)
     return local_filename
-
-
-# 获取任务流的固化
-def pipeline_immutable(pipeline):
-    if not pipeline:
-        return {}
-    tasks = pipeline.get_tasks()
-    tasks = pipeline.sort(tasks)
-    tasks_ids = {}
-    for task in tasks:
-        tasks_ids[str(task.id)] = task
-
-    data = {
-        "label": pipeline.describe,
-        "pipeline_id": pipeline.id,
-        "index": pipeline.id,
-        "pipeline": {
-            "describe": pipeline.describe,
-            "dag_json": json.loads(pipeline.dag_json),
-            "global_env": pipeline.global_env,
-        },
-        "task": [],
-        "args": {}
-    }
-    data['args'] = {}
-    # 按dag的顺序，为task进行排序
-    for task in tasks:
-        task_json = {
-            "job_templete": task.job_template.name,
-            "name": task.name,
-            "label": task.label,
-            "volume_mount": task.volume_mount,
-            "resource_memory": task.resource_memory,
-            "resource_cpu": task.resource_cpu,
-            "resource_gpu": task.resource_gpu,
-            "resource_rdma": task.resource_rdma,
-            "args": json.loads(task.args)
-        }
-        job_template_args = json.loads(task.job_template.args) if task.job_template.args else {}
-        task_arg = json.loads(task.args) if task.args else {}
-        new_task_arg = {}
-        if job_template_args and task_arg:
-
-            for group in job_template_args:
-                for key in job_template_args[group]:
-                    job_template_args[group][key]['task_id'] = task.id
-                    job_template_args[group][key]['task_arg'] = key
-                    job_template_args[group][key]['default'] = task_arg.get(key, job_template_args[group][key].get('default', ''))
-                    if job_template_args[group][key]['default']:
-                        job_template_args[group][key]['show'] = 1
-                    else:
-                        job_template_args[group][key]['show'] = 0
-
-                    # 去除原有分组层，本身也不能重复，统一使用任务名称为分组
-                    new_task_arg[task.name + "." + key] = job_template_args[group][key]
-
-        data['task'].append(task_json)
-        data['args'][task.label] = new_task_arg
-
-    immutable_config = json.loads(pipeline.parameter).get('immutable-config', {})
-
-    # 更新配置，用户可以自己定义分组，参数名等
-    def update_nested_dict(d, u):
-        for k, v in u.items():
-            if isinstance(v, dict) and isinstance(d.get(k), dict):
-                update_nested_dict(d[k], v)
-            else:
-                d[k] = v
-
-    update_nested_dict(data, immutable_config)
-    data['label']=immutable_config.get('label',data['label'])
-    return data
 
 
 # 多个volume_mount 合并在一起的写法，不能有相同mount的点
@@ -2564,3 +2260,33 @@ def open_jupyter(label,dom_name=None):
         return f'''<a href="#" onclick="const path = document.getElementById('form_in_modal_{dom_name}')?.value || '/mnt/{{{{creator}}}}'; window.open(`/notebook_modelview/api/entry/jupyter?file_path=${{encodeURIComponent(path)}}`, '_blank'); return false;"> {label}</a>'''
     else:
         return f'<a target="_blank" href="/notebook_modelview/api/entry/jupyter?file_path=/mnt/{{{{creator}}}}/">{label}</a>'
+
+# nodeSelector中org为逗号分隔数组
+def get_node_selector(node_selector):
+    nodeSelector = {}
+    nodeAffinity = {}
+    if node_selector and '=' in node_selector:
+        for selector in re.split(';|\n|\t', node_selector):
+            selector = selector.strip()
+            if selector:
+                if 'org' == selector.strip().split('=')[0].strip() and ',' in selector:
+                    org = selector.strip().split('=')[1].strip().split(',')  # 资源组是个逗号分隔的数组
+                    nodeAffinity={
+                        "requiredDuringSchedulingIgnoredDuringExecution": {
+                            "nodeSelectorTerms": [
+                                {
+                                    "matchExpressions": [
+                                        {
+                                            "key": "org",
+                                            "operator": "In",
+                                            "values": org
+                                        }
+                                    ]
+                                }
+                            ]
+                        }
+                    }
+                else:
+                    nodeSelector[selector.strip().split('=')[0].strip()] = selector.strip().split('=')[1].strip()
+
+    return nodeSelector,nodeAffinity

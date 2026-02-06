@@ -5,6 +5,7 @@ set -ex
 rm -f /home/myapp/myapp/static/mnt
 mkdir -p /data/k8s/kubeflow/pipeline/workspace
 ln -s /data/k8s/kubeflow/pipeline/workspace /home/myapp/myapp/static/mnt
+
 rm -f /home/myapp/myapp/static/dataset
 mkdir -p /data/k8s/kubeflow/dataset
 ln -s /data/k8s/kubeflow/dataset /home/myapp/myapp/static/
@@ -14,7 +15,6 @@ ln -s /cube-studio/aihub /home/myapp/myapp/static/
 
 rm -f /home/myapp/myapp/static/global
 ln -s /data/k8s/kubeflow/global /home/myapp/myapp/static/
-
 export FLASK_APP=myapp:app
 python myapp/create_db.py
 # myapp db init    # 生成migrations文件夹，不再需要操作
@@ -41,7 +41,7 @@ elif [ "$STAGE" = "dev" ]; then
 elif [ "$STAGE" = "prod" ]; then
   export FLASK_APP=myapp:app
   python myapp/check_tables.py
-  gunicorn --bind  0.0.0.0:80 --workers 20 --worker-class=gevent --timeout 300 --limit-request-line 0 --limit-request-field_size 0 --log-level=info myapp:app
+  gunicorn --bind  0.0.0.0:80 --workers 20 --worker-class=gevent --timeout 300 --limit-request-line 0 --limit-request-field_size 0 --log-level=info --access-logfile - --error-logfile - --capture-output myapp:app
 else
     myapp --help
 fi
